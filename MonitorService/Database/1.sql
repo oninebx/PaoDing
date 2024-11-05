@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS DbEndpoint;
+
+CREATE TABLE DbEndpoint (
+    Id INTEGER PRIMARY KEY AUTOINCREMENT, 
+    Host TEXT NOT NULL,      
+    Port INTEGER NOT NULL UNIQUE,          
+    Username TEXT NOT NULL UNIQUE,
+    PasswordHash TEXT NOT NULL,         
+    CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP, 
+    IsActive BOOLEAN DEFAULT 1
+);
