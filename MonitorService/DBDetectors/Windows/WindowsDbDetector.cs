@@ -8,7 +8,7 @@ namespace MonitorService.DBDetectors.Windows
 {
   public class WindowsDbDetector : IDbDetector
   {
-    public Task<IEnumerable<SqlServerEntry>> GetActiveEntries()
+    public Task<IEnumerable<DbEndPoint>> GetEndpoints()
     {
       throw new NotImplementedException();
     }

@@ -1,10 +1,10 @@
 namespace MonitorService;
 
-public class Worker : BackgroundService
+public class ChangeTrackingWorker : BackgroundService
 {
-    private readonly ILogger<Worker> _logger;
+    private readonly ILogger<ChangeTrackingWorker> _logger;
 
-    public Worker(ILogger<Worker> logger)
+    public ChangeTrackingWorker(ILogger<ChangeTrackingWorker> logger)
     {
         _logger = logger;
     }
@@ -13,7 +13,7 @@ public class Worker : BackgroundService
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            _logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
+            _logger.LogInformation("ChangeTrackingWorker running at: {time}", DateTimeOffset.Now);
             await Task.Delay(1000, stoppingToken);
         }
     }
