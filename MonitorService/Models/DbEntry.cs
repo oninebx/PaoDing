@@ -7,9 +7,22 @@ namespace MonitorService.Models
 {
     public class DbEntry
     {
-      public required string EntryKey { get; set; }
-      public required string UserName { get; set; }
-      public required string Password { get; set; }
-      public required bool IsMonitored { get; set; }
+      public required string KeyName { get; set; }
+      public required string EndpointKey { get; set; }
+      public required string ConnectionString { get; set; }
+      public required bool IsMonitoring { get; set; }
+    }
+
+    public class DbEntryComparer : IEqualityComparer<DbEntry>
+    {
+      public bool Equals(DbEntry x, DbEntry y) 
+      {
+        return x.KeyName == y.KeyName && x.EndpointKey == y.EndpointKey;
+      }
+
+      public int GetHashCode(DbEntry obj) 
+      {
+        return HashCode.Combine(obj.KeyName, obj.EndpointKey);
+      }
     }
 }

@@ -12,8 +12,10 @@ namespace MonitorService.DBDetectors.Docker
     public class DockerDbDetector : IDbDetector
     {
       private readonly string _apiUrl;
-      public DockerDbDetector(string url){
+      private readonly ManageDbMaintainer _maintainer;
+      public DockerDbDetector(string url, ManageDbMaintainer maintainer){
         _apiUrl = url;
+        _maintainer = maintainer;
       }
 
     public async Task<IEnumerable<DbEndPoint>> GetEndpoints()

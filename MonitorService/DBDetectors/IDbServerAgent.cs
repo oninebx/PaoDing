@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 
 namespace MonitorService.DBDetectors
 {
-    public interface IDatabase
+    public interface IDbServerAgent
     {
         
     }

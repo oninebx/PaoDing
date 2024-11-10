@@ -26,15 +26,15 @@ namespace MonitorService.Models
     }
 
     public class DbEndpointComparer : IEqualityComparer<DbEndPoint>
-{
-    public bool Equals(DbEndPoint? x, DbEndPoint? y) 
     {
-      return x?.Name == y?.Name && x?.Host == y?.Host && x?.Port == y?.Port && x?.State == y?.State;
-    }
+      public bool Equals(DbEndPoint? x, DbEndPoint? y) 
+      {
+        return x?.Name == y?.Name && x?.Host == y?.Host && x?.Port == y?.Port && x?.State == y?.State;
+      }
 
-    public int GetHashCode(DbEndPoint obj) 
-    {
-      return HashCode.Combine(obj.Name, obj.Host, obj.Port, obj.State);
+      public int GetHashCode(DbEndPoint obj) 
+      {
+        return HashCode.Combine(obj.Name, obj.Host, obj.Port, obj.State);
+      }
     }
-}
 }

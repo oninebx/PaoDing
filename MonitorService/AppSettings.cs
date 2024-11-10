@@ -7,6 +7,13 @@ namespace MonitorService
 {
     public class AppSettings
     {
-        public int Version {get;set;}
+        public IEnumerable<WorkingEntry> WorkingEntries { get; set; }
+    }
+
+    public class WorkingEntry 
+    {
+      public required string EndpointKey { get; set; }
+      public required string EntryKey { get; set; }
+      public required string ConnectionString { get; set; }
     }
 }

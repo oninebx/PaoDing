@@ -9,7 +9,7 @@ namespace MonitorService
 {
     public class ManageDbMaintainer
     {
-      private readonly string? _connectionString;
+      private readonly string _connectionString;
       private readonly ILogger<ManageDbMaintainer> _logger;
       public ManageDbMaintainer(IConfiguration configure, ILogger<ManageDbMaintainer> logger)
       {
@@ -44,28 +44,6 @@ namespace MonitorService
           }
         }
 
-        // public async Task<string> GetConnectionString(string database)
-        // {
-        //   using (var connection = new SqliteConnection(_connectionString))
-        //   {
-        //     connection.Open();
-        //     using(var command = connection.CreateCommand())
-        //     {
-        //       command.CommandText = "SELECT Host, Port, Username, PasswordHash From DbEndpoint WHERE DBKey = @database";
-        //       command.Parameters.AddWithValue("@database", database);
-        //       using var reader = await command.ExecuteReaderAsync();
-        //       if(await reader.ReadAsync()){
-        //         string host = reader.GetString(0);
-        //         string port = reader.GetString(1);
-        //         string username = reader.GetString(2);
-        //         string password = reader.GetString(3);
-        //         return $"Server={host},{port};Database={database};User Id={username};Password={password};";
-        //       }
-        //     }
-        //     return string.Empty;
-        //   }
-        // }
-
         public async Task<IEnumerable<DbEntry>> GetEntriesOfEndpoint(string endpoint)
         {
           using(var connection = new SqliteConnection(_connectionString))
@@ -73,59 +51,85 @@ namespace MonitorService
             connection.Open();
             var command = connection.CreateCommand();
             command.CommandText = 
-            @"SELECT de.EntryKey, dp.Host, dp.Port, de.UserName, de.Password FROM 
-            DbEntry de  JOIN DbEndpoint dp 
-            ON (de.EndpointId = dp.Id) WHERE dp.EndpointKey = @endpoint";
+            @"SELECT de.KeyName, de.ConnectionString, de.IsMonitoring, de.EndpointKey FROM 
+            DbEntry de JOIN DbEndpoint dp 
+            ON (de.EndpointKey = dp.KeyName) WHERE dp.KeyName = @endpoint";
             command.Parameters.AddWithValue("@endpoint", endpoint);
-            var entries = new List<DbEntry>();
-            using (var reader = await command.ExecuteReaderAsync())
-            {
-              while (reader.Read())
-              {
-                string database = reader.GetString(0);
-                string host = reader.GetString(1);
-                int port = reader.GetInt32(2);
-                string username = reader.GetString(3);
-                string password = reader.GetString(4);
-                var entry = new DbEntry 
-                {
-                  EntryKey = database,
-                  UserName = username,
-                  Password = password,
-                  IsMonitored = false
-                };
-                entries.Add(entry);
-              }
-            }
-            return entries;
+            using var reader = await command.ExecuteReaderAsync();
+            return ParseEntriesFromReader(reader);
+          }
+        }
+
+        public async Task<IEnumerable<DbEntry>> GetAvailableEntries()
+        {
+          using(var connection = new SqliteConnection(_connectionString))
+          {
+            connection.Open();
+            var command = connection.CreateCommand();
+            command.CommandText = 
+            @"SELECT KeyName, ConnectionString, IsMonitoring, EndpointKey FROM 
+            DbEntry WHERE IsMonitoring = true;";
+            using var reader = await command.ExecuteReaderAsync();
+            return ParseEntriesFromReader(reader);
           }
         }
 
         public async Task<int> UpdateEndpoints(IEnumerable<DbEndPoint> endPoints)
         {
           int result = 0;
-          var sql = @"INSERT INTO DbEndpoint (EndpointKey, Host, Port, State)
-                      VALUES (@endpointKey, @host, @port, @state)
-                      ON CONFLICT(EndpointKey) DO UPDATE SET
+          var sql = @"INSERT INTO DbEndpoint (KeyName, Host, Port, State)
+                      VALUES (@keyName, @host, @port, @state)
+                      ON CONFLICT(KeyName) DO UPDATE SET
                       State = @state;";
-          var sqlForRunning = @"INSERT INTO DbEndpoint (EndpointKey, Host, Port, State)
-                      VALUES (@endpointKey, @host, @port, @state)
-                      ON CONFLICT(EndpointKey) DO UPDATE SET
+          var sqlForRunning = @"INSERT INTO DbEndpoint (KeyName, Host, Port, State)
+                      VALUES (@keyName, @host, @port, @state)
+                      ON CONFLICT(KeyName) DO UPDATE SET
                       Host = @host, Port=@port, State = @state;";
           using(var connection = new SqliteConnection(_connectionString))
           {
               connection.Open();
+              var transaction = connection.BeginTransaction();
               foreach(var endpoint in endPoints)
               {
                 var command = connection.CreateCommand();
+                command.Transaction = transaction;
                 command.CommandText = endpoint.State == 1 ? sqlForRunning : sql;
-                command.Parameters.AddWithValue("@endpointKey", endpoint.Name);
+                command.Parameters.AddWithValue("@keyName", endpoint.Name);
                 command.Parameters.AddWithValue("@host", endpoint.Host == "0.0.0.0" ? "localhost" : endpoint.Host);
                 command.Parameters.AddWithValue("@port", endpoint.Port);
                 command.Parameters.AddWithValue("@state", endpoint.State);
                 result += await command.ExecuteNonQueryAsync();
                 _logger.LogInformation("{name} -> {host}:{port} is {state}", endpoint.Name, endpoint.Host, endpoint.Port, endpoint.State);
               }
+              transaction.Commit();
+          }
+          
+          return result;
+        }
+        public async Task<int> UpdateEntries(IEnumerable<DbEntry> entries)
+        {
+          int result = 0;
+          var sql = @"INSERT INTO DbEntry (KeyName, EndpointKey, ConnectionString, IsMonitoring)
+                      VALUES (@keyName, @endpointKey, @connectionString, @isMonitoring)
+                      ON CONFLICT(EndpointKey, KeyName) DO UPDATE SET
+                      ConnectionString = @connectionString, IsMonitoring = @isMonitoring;";
+          using(var connection = new SqliteConnection(_connectionString))
+          {
+            connection.Open();
+            var transaction = connection.BeginTransaction();
+            foreach(var entry in entries)
+            {
+              var command = connection.CreateCommand();
+              command.Transaction = transaction;
+              command.CommandText = sql;
+              command.Parameters.AddWithValue("@keyName", entry.KeyName);
+              command.Parameters.AddWithValue("@endpointKey", entry.EndpointKey);
+              command.Parameters.AddWithValue("@connectionString", entry.ConnectionString);
+              command.Parameters.AddWithValue("@isMonitoring", entry.IsMonitoring);
+              result += await command.ExecuteNonQueryAsync();
+              _logger.LogInformation("{endpoint}.{entry} is added or updated", entry.EndpointKey, entry.KeyName);
+            }
+            transaction.Commit();
           }
           
           return result;
@@ -163,6 +167,27 @@ namespace MonitorService
           command.CommandText = "UPDATE SchemaVersion SET Version = @version";
           command.Parameters.AddWithValue("@version", version);
           command.ExecuteNonQuery();
+      }
+
+      private IEnumerable<DbEntry> ParseEntriesFromReader(SqliteDataReader reader)
+      {
+        var entries = new List<DbEntry>();
+        while (reader.Read())
+        {
+          string database = reader.GetString(0);
+          string connectionString = reader.GetString(1);
+          bool isMonitoring = reader.GetBoolean(2);
+          string endpoint = reader.GetString(3);
+          var entry = new DbEntry 
+          {
+            KeyName = database,
+            EndpointKey = endpoint,
+            ConnectionString = connectionString,
+            IsMonitoring = isMonitoring
+          };
+          entries.Add(entry);
+        }
+        return entries;
       }
     }
 }
