@@ -9,16 +9,16 @@ namespace MonitorService.Core
 {
     public class ChannelMessenger
     {
-        public Channel<Message> _channel = Channel.CreateUnbounded<Message>();
+        public Channel<IMessage> _channel = Channel.CreateUnbounded<IMessage>();
 
-        public async Task Send(Message message, CancellationToken token)
+        public async Task Send(IMessage message, CancellationToken token)
         {
           if(message != null) {
             await _channel.Writer.WriteAsync(message, token);
           }
         }
 
-        public async Task SendBulk(IEnumerable<Message> messages, CancellationToken token)
+        public async Task SendBulk(IEnumerable<IMessage> messages, CancellationToken token)
         {
           if(messages?.Any() ?? false)
           {
@@ -29,8 +29,9 @@ namespace MonitorService.Core
           }
         }
 
-        public IAsyncEnumerable<Message> Receive(CancellationToken token)
+        public IAsyncEnumerable<IMessage> Receive(CancellationToken token)
         {
+          
           return _channel.Reader.ReadAllAsync(token);
         }
     }

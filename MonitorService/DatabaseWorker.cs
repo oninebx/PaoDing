@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
 using MonitorService.Core;
+using MonitorService.Core.Message;
 using MonitorService.DataTracking;
 using MonitorService.DBDetectors;
 using MonitorService.Models;
@@ -19,7 +20,7 @@ namespace MonitorService
   {
     private readonly ILogger<DatabaseWorker> _logger;
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly AppSettings _appSettings;
+    private AppSettings _appSettings;
     private readonly ManageDbMaintainer _maintainer;
     private readonly ChannelMessenger _messenger;
 
@@ -29,13 +30,21 @@ namespace MonitorService
       _appSettings = appSettings.CurrentValue;
       appSettings.OnChange(async settings => 
       {
+        var comparer = new WorkingEntryComparer();
+        if(!settings.WorkingEntries.Except(_appSettings.WorkingEntries, comparer).Any()
+        && !_appSettings.WorkingEntries.Except(settings.WorkingEntries, comparer).Any())
+        {
+          return;
+        }
+        _appSettings = settings;
         // Update configured entries to Manage Database
+        _logger.LogCritical("OnChange is called, {count} entries.", settings.WorkingEntries.Count());
         var entriesToAdd = settings.WorkingEntries.Select(e => new DbEntry
         {
           KeyName = e.EntryKey,
           EndpointKey = e.EndpointKey,
           ConnectionString = e.ConnectionString,
-          IsMonitoring = true
+          IsMonitoring = e.IsMonitoring
         });
         await UpdateAndNotifyDbEntryChanges(entriesToAdd);
       });
@@ -64,7 +73,7 @@ namespace MonitorService
             KeyName = entry.EntryKey,
             EndpointKey = entry.EndpointKey,
             ConnectionString = entry.ConnectionString,
-            IsMonitoring = true
+            IsMonitoring = entry.IsMonitoring
           });
         var savedEntries = await _maintainer.GetAvailableEntries();
         var diffEntries = savedEntries.Except(configuredEntries, new DbEntryComparer());
@@ -83,19 +92,55 @@ namespace MonitorService
             currentEndpoints = endpoints;
           }
 
+          // Scan Monitor Task
+          var avaliableTasks = await _maintainer.GetMonitorTasks();
+
+          // Wait for a ongoing Task
+          if(avaliableTasks.Any(t => t.State == 1))
+          {
+            _logger.LogDebug("There is already 1 onging monitor task.");
+            continue;
+          }
+
+          // Finalise a concluding Task
+          var endingTask = avaliableTasks.FirstOrDefault(t => t.State == 2);
+          if(endingTask is not null)
+          {
+            await _messenger.Send(Task2Message(endingTask), stoppingToken);
+            endingTask.State = 3;
+            await _maintainer.UpdateMonitorTask(endingTask);
+          }
+
+          // Pick up a ready task
+          var readyTask = avaliableTasks.FirstOrDefault(t => t.State == 0);
+          if(readyTask is not null)
+          {
+            await _messenger.Send(Task2Message(readyTask), stoppingToken);
+            readyTask.State = 1;
+            await _maintainer.UpdateMonitorTask(readyTask);
+          }
+
           await Task.Delay(2_000, stoppingToken);
         }
       }
     }
 
+    private Func<MonitorTask, TaskMessage> Task2Message = task => new TaskMessage
+    {
+      Name = task.Name,
+      Endpoint = task.Endpoint,
+      State = task.State
+    };
     private async Task UpdateAndNotifyDbEntryChanges(IEnumerable<DbEntry> entries)
     {
+      _logger.LogCritical("Dispatch {count} tracer message", entries.Count());
       await _maintainer.UpdateEntries(entries);
 
-      var messages = entries.Select(entry => new Message
+      var messages = entries.Select(entry => new TracerMessage
       {
         DbKey = $"{entry.EndpointKey}.{entry.KeyName}",
-        ConnectionString = entry.ConnectionString
+        ConnectionString = entry.ConnectionString,
+        IsMonitoring = entry.IsMonitoring
       });
       await _messenger.SendBulk(messages, default);
     }

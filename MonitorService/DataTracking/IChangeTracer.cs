@@ -9,7 +9,8 @@ namespace MonitorService.DataTracking
     {
         Task EnableDatabaseTracking();
         Task DisableDatabaseTracking();
-        Task GetChanges();
+        Task UpdateCurrentVersion();
+        Task GetDataChanges();
         string DbKey { get; }
     }
 }
