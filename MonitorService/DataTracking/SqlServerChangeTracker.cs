@@ -100,9 +100,9 @@ namespace MonitorService.DataTracking
       await command.ExecuteNonQueryAsync();
     }
 
-    public async Task GetDataChanges()
+    public DataSet GetDataChanges()
     {
-      var sql = $@"DECLARE @last_known_version BIGINT = 0;
+      var sql = $@"DECLARE @last_known_version BIGINT = {_currentVersion};
                   DECLARE @current_version BIGINT = CHANGE_TRACKING_CURRENT_VERSION();
                   DECLARE @table_name NVARCHAR(128);
                   DECLARE table_cursor CURSOR FOR 
@@ -117,7 +117,7 @@ namespace MonitorService.DataTracking
                     WHERE TABLE_NAME = @table_name
                     AND OBJECTPROPERTY(OBJECT_ID(CONSTRAINT_SCHEMA + '.' + CONSTRAINT_NAME), 'IsPrimaryKey') = 1;
 
-                    DECLARE @sql NVARCHAR(MAX) = 'SELECT t.*,  ct.* FROM ' + @table_name + ' AS t RIGHT OUTER JOIN CHANGETABLE(CHANGES ' + @table_name + ', ' + CAST(@last_known_version AS NVARCHAR) + ') AS ct ON t.' + @primaryKey + ' = ct.' + @primaryKey;
+                    DECLARE @sql NVARCHAR(MAX) = 'SELECT ''' + @table_name + ''' AS TableName, t.*,  ct.* FROM ' + @table_name + ' AS t RIGHT OUTER JOIN CHANGETABLE(CHANGES ' + @table_name + ', ' + CAST(@last_known_version AS NVARCHAR) + ') AS ct ON t.' + @primaryKey + ' = ct.' + @primaryKey;
                     EXEC sp_executesql @sql;
                     FETCH NEXT FROM table_cursor INTO @table_name;
                   END;
@@ -128,6 +128,7 @@ namespace MonitorService.DataTracking
         connection.Open();
         SqlDataAdapter adapter = new(sql, connection);
         DataSet changeSet = new();
+        
         adapter.Fill(changeSet);
 
         for (int i = changeSet.Tables.Count - 1; i >= 0; i--)
@@ -139,8 +140,8 @@ namespace MonitorService.DataTracking
             }
         }
         
-        
-        _logger.LogCritical("Data changes in {count} table(s) ",changeSet.Tables.Count);
+        _logger.LogCritical("Data changes in {count} table(s) from {database}",changeSet.Tables.Count, DbKey);
+        return changeSet;
 
     }
 
