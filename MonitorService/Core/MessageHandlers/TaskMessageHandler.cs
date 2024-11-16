@@ -8,7 +8,7 @@ using MonitorService.Core.Message;
 
 namespace MonitorService.Core.MessageHandlers
 {
-  public class TaskMessageHandler : MessageHandler<TaskMessageHandler, TaskMessage>
+  public class TaskMessageHandler : MessageHandler<TaskBackMessage, TaskMessageHandler, TaskMessage>
   {
     private readonly TracerContainer _container;
     public TaskMessageHandler(TracerContainer container, ILogger<TaskMessageHandler> logger) : base(logger)
@@ -16,7 +16,7 @@ namespace MonitorService.Core.MessageHandlers
       _container = container;
     }
 
-    public override async Task Handle(TaskMessage message)
+    public override async Task<TaskBackMessage> Handle(TaskMessage message)
     {
       var tracers = _container.Search(message.Endpoint);
       switch(message.State)
@@ -28,17 +28,21 @@ namespace MonitorService.Core.MessageHandlers
             await tracer.UpdateCurrentVersion();
             _logger.LogInformation("{name} monitor task started in {endpoint}.", message.Name, message.Endpoint);
           }
-          break;
-        case 1:
-          
-          break;
+          return new TaskBackMessage { Id = message.Id, State = 1, Content = string.Empty};
         case 2:
           // Get the Data changes
           var changeSets = tracers.Select(tracer => tracer.GetDataChanges());
           var changeJson = UnionDataSets(changeSets.ToArray());
-          _logger.LogCritical("The content of changes in {task} is {json}", message.Name, changeJson);
-          break;
+          if(string.IsNullOrEmpty(changeJson))
+          {
+            _logger.LogWarning("No data changes in {task}.", $"{message.Endpoint}.{message.Name}");
+          }
+          else{
+            _logger.LogDebug("The data changes in {task} is {content}.", $"{message.Endpoint}.{message.Name}", changeJson);
+          }
+          return new TaskBackMessage { Id = message.Id, State = 3, Content = changeJson };
       }
+      return default;
     }
 
     public string UnionDataSets(params DataSet[] dataSets)
@@ -82,7 +86,7 @@ namespace MonitorService.Core.MessageHandlers
           }
           jsonResult[tableName] = tableData;
         }
-        var options = new JsonSerializerOptions { WriteIndented = true };
+        var options = new JsonSerializerOptions { WriteIndented = false };
         return JsonSerializer.Serialize(jsonResult, options);
     }
   }

@@ -5,8 +5,8 @@ using System.Threading.Tasks;
 
 namespace MonitorService.Core
 {
-    public interface IHandler<T> where T : IMessage
+    public interface IHandler<R, M> where M : IMessage
     {
-        Task Handle(T message);
+        Task<R> Handle(M message);
     }
 }

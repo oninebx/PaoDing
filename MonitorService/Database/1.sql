@@ -5,7 +5,6 @@ DROP TABLE IF EXISTS MonitorChange;
 DROP TABLE IF EXISTS MonitorTask;
 DROP TABLE IF EXISTS DbEndpoint;
 
-
 CREATE TABLE DbEndpoint (
     Id INTEGER PRIMARY KEY AUTOINCREMENT,
     KeyName TEXT NOT NULL UNIQUE,
@@ -32,6 +31,7 @@ CREATE TABLE MonitorTask (
   EndpointKey TEXT NOT NULL,
   TaskState INTEGER NOT NULL DEFAULT 0, -- 0: Ready; 1:OnGoing; 2:Concluding; 3:Completed
   CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, 
+  UNIQUE(EndpointKey, TaskName),
   FOREIGN KEY(EndpointKey) REFERENCES DbEndpoint(KeyName)
 );
 

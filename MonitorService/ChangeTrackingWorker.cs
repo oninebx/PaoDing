@@ -26,15 +26,17 @@ public class ChangeTrackingWorker : BackgroundService
       var trancerHandler= provider.GetRequiredService<TracerMessageHandler>();
       var taskHandler = provider.GetRequiredService<TaskMessageHandler>();
 
-      await foreach(var message in _messenger.Receive(stoppingToken))
+      await foreach(var message in _messenger.ForwardReceive(stoppingToken))
       {
         if(message is TracerMessage tracerMsg)
         {
-          await trancerHandler.Handle(tracerMsg);
+          var backMessage = await trancerHandler.Handle(tracerMsg);
+          await _messenger.BacwardSend(backMessage, stoppingToken);
         }
         if(message is TaskMessage taskMsg)
         {
-          await taskHandler.Handle(taskMsg);
+          var backMessage = await taskHandler.Handle(taskMsg);
+          await _messenger.BacwardSend(backMessage, stoppingToken);
         }
         
         _logger.LogInformation("Waiting for new Message...");

@@ -28,7 +28,15 @@ namespace MonitorService.DataTracking
       else
       {
         var sqlToEnableDbChangeTracking = $@"
-            ALTER DATABASE [{_database}] SET CHANGE_TRACKING = ON (CHANGE_RETENTION = 2 DAYS, AUTO_CLEANUP = ON);";
+            BEGIN TRY
+              IF DB_ID(N'{_database}') IS NOT NULL
+              BEGIN
+                DECLARE @SQL NVARCHAR(MAX) = 'ALTER DATABASE [{_database}] SET CHANGE_TRACKING = ON (CHANGE_RETENTION = 2 DAYS, AUTO_CLEANUP = ON);'
+                EXEC sp_executesql @SQL;
+              END
+            END TRY
+            BEGIN CATCH
+            END CATCH;";
         var sqlToEnableTablesChangeTracking = $@"
             USE [{_database}];
             DECLARE @TableName NVARCHAR(128);
@@ -39,14 +47,17 @@ namespace MonitorService.DataTracking
 
               WHILE @@FETCH_STATUS = 0
               BEGIN
+                BEGIN TRY
                   DECLARE @SQL NVARCHAR(MAX) = 'ALTER TABLE ' + QUOTENAME(@TableName) + ' ENABLE CHANGE_TRACKING WITH (TRACK_COLUMNS_UPDATED = ON);';
                   EXEC sp_executesql @SQL;
-                  FETCH NEXT FROM TableCursor INTO @TableName;
+                END TRY
+                BEGIN CATCH
+                END CATCH
+                FETCH NEXT FROM TableCursor INTO @TableName;
               END;
 
             CLOSE TableCursor;
-            DEALLOCATE TableCursor;
-          ";
+            DEALLOCATE TableCursor;";
         await ExecuteNonQuery($"{sqlToEnableDbChangeTracking}{sqlToEnableTablesChangeTracking}");
         _logger.LogInformation("Enable tracking for {database} successfully", DbKey);
       }
@@ -65,17 +76,28 @@ namespace MonitorService.DataTracking
 
               WHILE @@FETCH_STATUS = 0
               BEGIN
+                BEGIN TRY
                   DECLARE @SQL NVARCHAR(MAX) = 'ALTER TABLE ' + QUOTENAME(@TableName) + ' DISABLE CHANGE_TRACKING';
                   EXEC sp_executesql @SQL;
-                  FETCH NEXT FROM TableCursor INTO @TableName;
+                END TRY
+                BEGIN CATCH
+                END CATCH
+                FETCH NEXT FROM TableCursor INTO @TableName;
               END;
 
             CLOSE TableCursor;
             DEALLOCATE TableCursor;
           ";
       var sqlToDisableDbChangeTracking = $@"
-            ALTER DATABASE [{_database}]
-            SET CHANGE_TRACKING = OFF;";
+            BEGIN TRY
+              IF DB_ID(N'{_database}') IS NOT NULL
+              BEGIN
+                DECLARE @SQL NVARCHAR(MAX) = 'ALTER DATABASE [{_database}] SET CHANGE_TRACKING = OFF;'
+                EXEC sp_executesql @SQL;
+              END
+            END TRY
+            BEGIN CATCH
+            END CATCH;";
 
         await ExecuteNonQuery($"{sqlToDisableTablesChangeTracking}{sqlToDisableDbChangeTracking}");
         _logger.LogInformation("Disable tracking for {database}", DbKey);
@@ -117,7 +139,9 @@ namespace MonitorService.DataTracking
                     WHERE TABLE_NAME = @table_name
                     AND OBJECTPROPERTY(OBJECT_ID(CONSTRAINT_SCHEMA + '.' + CONSTRAINT_NAME), 'IsPrimaryKey') = 1;
 
-                    DECLARE @sql NVARCHAR(MAX) = 'SELECT ''' + @table_name + ''' AS TableName, t.*,  ct.* FROM ' + @table_name + ' AS t RIGHT OUTER JOIN CHANGETABLE(CHANGES ' + @table_name + ', ' + CAST(@last_known_version AS NVARCHAR) + ') AS ct ON t.' + @primaryKey + ' = ct.' + @primaryKey;
+                    DECLARE @sql NVARCHAR(MAX) = 'SELECT ''' + @table_name + ''' AS TableName, t.*,  ct.SYS_CHANGE_OPERATION FROM ' + @table_name + ' AS t 
+                    RIGHT OUTER JOIN CHANGETABLE(CHANGES ' + @table_name + ', ' + CAST(@last_known_version AS NVARCHAR) + ') AS ct 
+                    ON t.' + @primaryKey + ' = ct.' + @primaryKey + ' ORDER BY ct.SYS_CHANGE_VERSION';
                     EXEC sp_executesql @sql;
                     FETCH NEXT FROM table_cursor INTO @table_name;
                   END;

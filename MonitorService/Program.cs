@@ -34,6 +34,8 @@ IHost host = Host.CreateDefaultBuilder(args)
       services.AddSingleton<ManageDbMaintainer>();
       services.AddScoped<TracerMessageHandler>();
       services.AddScoped<TaskMessageHandler>();
+      services.AddScoped<TracerBackMessageHandler>();
+      services.AddScoped<TaskBackMessageHandler>();
       services.AddSingleton<ChannelMessenger>();
       
       services.AddHostedService<DatabaseWorker>();

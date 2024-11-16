@@ -9,7 +9,7 @@ namespace MonitorService.Models
     {
       public required string KeyName { get; set; }
       public required string EndpointKey { get; set; }
-      public required string ConnectionString { get; set; }
+      public string ConnectionString { get; set; }
       public required bool IsMonitoring { get; set; }
     }
 

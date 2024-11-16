@@ -8,7 +8,7 @@ using MonitorService.Models;
 
 namespace MonitorService.Core.MessageHandlers
 {
-  public class TracerMessageHandler : MessageHandler<TracerMessageHandler, TracerMessage>
+  public class TracerMessageHandler : MessageHandler<TracerBackMessage, TracerMessageHandler, TracerMessage>
   {
     private ILogger<SqlServerChangeTracker> _tracerLogger;
     private TracerContainer _container;
@@ -18,8 +18,9 @@ namespace MonitorService.Core.MessageHandlers
       _container = container;
     }
 
-    public override async Task Handle(TracerMessage message)
+    public override async Task<TracerBackMessage> Handle(TracerMessage message)
     {
+      bool isActive = message.IsMonitoring;
       _logger.LogCritical("Receive message - {dbKey} connects via {connectionString}", message.DbKey, message.ConnectionString);
       
       var tracer = _container.Get(message.DbKey);
@@ -33,7 +34,9 @@ namespace MonitorService.Core.MessageHandlers
         if(!await EnsureStartTracking(tracer))
         {
           _container.Remove(message.DbKey);
+          isActive = false;
         }
+        
       }
       else
       {
@@ -51,6 +54,7 @@ namespace MonitorService.Core.MessageHandlers
         }
       }
       _logger.LogCritical("Tracers Update - {count} tracers are working.", _container.Size);
+      return new TracerBackMessage {DbKey = message.DbKey, IsActive = isActive };
     }
 
     private async Task<bool> EnsureStartTracking(IChangeTracer tracer)

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using MonitorService.Models;
 
@@ -103,6 +104,7 @@ namespace MonitorService
         public async Task<int> UpdateEntries(IEnumerable<DbEntry> entries)
         {
           int result = 0;
+          
           var sql = @"INSERT INTO DbEntry (KeyName, EndpointKey, ConnectionString, IsMonitoring)
                       VALUES (@keyName, @endpointKey, @connectionString, @isMonitoring)
                       ON CONFLICT(EndpointKey, KeyName) DO UPDATE SET
@@ -125,6 +127,22 @@ namespace MonitorService
           transaction.Commit();
           
           return result;
+        }
+
+        public bool UpdateEntry(DbEntry entry)
+        {
+          var sql = @"UPDATE DbEntry SET IsMonitoring = @isMonitoring WHERE KeyName = @key AND EndpointKey = @endpoint";
+          using var connection = new SqliteConnection(_connectionString);
+          connection.Open();
+          using var command = connection.CreateCommand();
+          command.CommandText = sql;
+          var parameters = new SqliteParameter[]
+          {
+            new("@isMonitoring", entry.IsMonitoring),
+            new("@key", entry.KeyName),
+            new("@endpoint", entry.EndpointKey)
+          };
+          return ExecuteNonQuery(sql, parameters) != 0;
         }
         public async Task<IEnumerable<MonitorTask>> GetMonitorTasks()
         {
@@ -153,7 +171,6 @@ namespace MonitorService
           }
           return result;
         }
-
         public async Task UpdateMonitorTasks(IEnumerable<MonitorTask> tasks)
         {
           var sql = @"UPDATE MonitorTask SET TaskState = @state WHERE Id = @id";
@@ -182,6 +199,34 @@ namespace MonitorService
           command.Parameters.AddWithValue("@id", task.Id);
           await command.ExecuteNonQueryAsync();
         }
+
+        public bool UpdateMonitorChanges(int taskId, string content)
+        {
+          if(taskId < 0 || string.IsNullOrEmpty(content))
+          {
+            _logger.LogWarning("{name}:Invalid taskId{taskId} or empty content", nameof(UpdateMonitorChanges), taskId);
+            return false;
+          }
+          var sql = @"INSERT INTO MonitorChange(TaskId, Content) VALUES(@taskId, @content);";
+         
+          var parameters = new SqliteParameter[] 
+          {
+            new("@taskId", taskId),
+            new("@content", content)
+          };
+          return ExecuteNonQuery(sql, parameters) != 0;
+        }
+
+        private int ExecuteNonQuery(string sql, IEnumerable<SqliteParameter> parameters)
+        {
+          using var connection = new SqliteConnection(_connectionString);
+          connection.Open();
+          using var command = connection.CreateCommand();
+          command.CommandText = sql;
+          command.Parameters.AddRange(parameters.ToArray());
+          return command.ExecuteNonQuery();
+        }
+
         private void EnsureVersionTableExists(SqliteConnection connection)
         {
           using var command = connection.CreateCommand();

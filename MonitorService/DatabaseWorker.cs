@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
 using MonitorService.Core;
 using MonitorService.Core.Message;
+using MonitorService.Core.MessageHandlers;
 using MonitorService.DataTracking;
 using MonitorService.DBDetectors;
 using MonitorService.Models;
@@ -57,35 +59,37 @@ namespace MonitorService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
       _maintainer.InitializeDatabase();
-      using (var scope = _scopeFactory.CreateScope())
+      using var scope = _scopeFactory.CreateScope();
+      var provider = scope.ServiceProvider;
+      var detector = provider.GetRequiredService<IDbDetector>();
+      _logger.LogInformation("Worker running at: {time} with {detector}", DateTimeOffset.Now, detector.GetType().Name);
+
+      var currentEndpoints = await detector.GetEndpoints();
+      var count = await _maintainer.UpdateEndpoints(currentEndpoints);
+      _logger.LogCritical("Update {count} Database Endpoints", count);
+
+      // Scan Database Entries from Configuration and ManageDB
+      var configuredEntries = _appSettings.WorkingEntries.Select(entry =>
+        new DbEntry
+        {
+          KeyName = entry.EntryKey,
+          EndpointKey = entry.EndpointKey,
+          ConnectionString = entry.ConnectionString,
+          IsMonitoring = entry.IsMonitoring
+        });
+      var savedEntries = await _maintainer.GetAvailableEntries();
+      var diffEntries = savedEntries.Except(configuredEntries, new DbEntryComparer());
+      var availableEntries = configuredEntries.Concat(diffEntries);
+      await UpdateAndNotifyDbEntryChanges(availableEntries);
+
+      _ = Task.Run(async () =>
       {
-        var detector = scope.ServiceProvider.GetRequiredService<IDbDetector>();
-        _logger.LogInformation("Worker running at: {time} with {detector}", DateTimeOffset.Now, detector.GetType().Name);
-        
-        var currentEndpoints = await detector.GetEndpoints();
-        var count = await _maintainer.UpdateEndpoints(currentEndpoints);
-        _logger.LogCritical("Update {count} Database Endpoints", count);
-
-        // Scan Database Entries from Configuration and ManageDB
-        var configuredEntries = _appSettings.WorkingEntries.Select(entry => 
-          new DbEntry
-          {
-            KeyName = entry.EntryKey,
-            EndpointKey = entry.EndpointKey,
-            ConnectionString = entry.ConnectionString,
-            IsMonitoring = entry.IsMonitoring
-          });
-        var savedEntries = await _maintainer.GetAvailableEntries();
-        var diffEntries = savedEntries.Except(configuredEntries, new DbEntryComparer());
-        var availableEntries = configuredEntries.Concat(diffEntries);
-        await UpdateAndNotifyDbEntryChanges(availableEntries);
-
         while (!stoppingToken.IsCancellationRequested)
         {
           // Scan Database Endpoints
           var endpoints = await detector.GetEndpoints();
           var diffEndpoints = endpoints.Except(currentEndpoints, new DbEndpointComparer());
-          if(diffEndpoints.Any())
+          if (diffEndpoints.Any())
           {
             count = await _maintainer.UpdateEndpoints(diffEndpoints);
             _logger.LogCritical("Update {count} Database Endpoints", count);
@@ -96,7 +100,7 @@ namespace MonitorService
           var avaliableTasks = await _maintainer.GetMonitorTasks();
 
           // Wait for a ongoing Task
-          if(avaliableTasks.Any(t => t.State == 1))
+          if (avaliableTasks.Any(t => t.State == 1))
           {
             _logger.LogDebug("There is already 1 onging monitor task.");
             continue;
@@ -104,29 +108,47 @@ namespace MonitorService
 
           // Finalise a concluding Task
           var endingTask = avaliableTasks.FirstOrDefault(t => t.State == 2);
-          if(endingTask is not null)
+          if (endingTask is not null)
           {
-            await _messenger.Send(Task2Message(endingTask), stoppingToken);
+            await _messenger.ForwardSend(Task2Message(endingTask), stoppingToken);
+
             endingTask.State = 3;
             await _maintainer.UpdateMonitorTask(endingTask);
           }
 
           // Pick up a ready task
           var readyTask = avaliableTasks.FirstOrDefault(t => t.State == 0);
-          if(readyTask is not null)
+          if (readyTask is not null)
           {
-            await _messenger.Send(Task2Message(readyTask), stoppingToken);
+            await _messenger.ForwardSend(Task2Message(readyTask), stoppingToken);
             readyTask.State = 1;
             await _maintainer.UpdateMonitorTask(readyTask);
           }
 
           await Task.Delay(2_000, stoppingToken);
         }
+      });
+
+      var tracerBackHandler = provider.GetRequiredService<TracerBackMessageHandler>();
+      var taskBackHandler = provider.GetRequiredService<TaskBackMessageHandler>();
+      await foreach (var message in _messenger.BackwardReceive(stoppingToken))
+      {
+        if(message is TracerBackMessage tracerBackMessage)
+        {
+          _ = await tracerBackHandler.Handle(tracerBackMessage);
+          _logger.LogInformation("Tracer for {name} is {state}", tracerBackMessage.DbKey, tracerBackMessage.IsActive ? "active" : "inactive");
+        }
+        if(message is TaskBackMessage taskBackMessage)
+        {
+          _ = await taskBackHandler.Handle(taskBackMessage);
+          _logger.LogInformation("Monitor Task#{id} is done", taskBackMessage.Id);
+        }
       }
     }
 
     private Func<MonitorTask, TaskMessage> Task2Message = task => new TaskMessage
     {
+      Id = task.Id,
       Name = task.Name,
       Endpoint = task.Endpoint,
       State = task.State
@@ -142,7 +164,7 @@ namespace MonitorService
         ConnectionString = entry.ConnectionString,
         IsMonitoring = entry.IsMonitoring
       });
-      await _messenger.SendBulk(messages, default);
+      await _messenger.ForwardSendBulk(messages, default);
     }
 
   }
